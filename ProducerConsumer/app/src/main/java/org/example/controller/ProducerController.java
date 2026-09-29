@@ -1,40 +1,48 @@
 package org.example.controller;
 
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerRecord;
+import org.example.config.KafkaTopicProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Properties;
-
 @RestController
 @RequestMapping("/producer")
 public class ProducerController {
-    private static final String TOPIC_NAME = "testy";
-    private static final String BOOTSTRAP_SERVERS = "13.127.99.104:9092";
 
-    private final Producer<String, String> kafkaProducer;
+    private static final Logger log = LoggerFactory.getLogger(ProducerController.class);
+    private static final String EVENT_KEY = "userEvent";
 
-    public ProducerController() {
-        Properties props = new Properties();
-        props.put("bootstrap.servers", BOOTSTRAP_SERVERS);
-        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        this.kafkaProducer = new KafkaProducer<>(props);
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final KafkaTopicProperties kafkaTopicProperties;
+
+    public ProducerController(
+            KafkaTemplate<String, String> kafkaTemplate,
+            KafkaTopicProperties kafkaTopicProperties
+    ) {
+        this.kafkaTemplate = kafkaTemplate;
+        this.kafkaTopicProperties = kafkaTopicProperties;
     }
 
     @PostMapping("/event")
-    public void sendEventToKafka(@RequestBody String eventData) {
-        ProducerRecord<String, String> record = new ProducerRecord<>(TOPIC_NAME, "userEvent", eventData);
-        kafkaProducer.send(record, (metadata, exception) -> {
-            if (exception != null) {
-                System.err.println("Error sending message to Kafka: " + exception.getMessage());
-            } else {
-                System.out.println("Message sent to Kafka, offset: " + metadata.offset());
-            }
-        });
+    public ResponseEntity<Void> sendEventToKafka(@RequestBody String eventData) {
+        if (eventData == null || eventData.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        kafkaTemplate.send(kafkaTopicProperties.topic(), EVENT_KEY, eventData)
+                .whenComplete((result, exception) -> {
+                    if (exception != null) {
+                        log.error("Error sending message to Kafka", exception);
+                        return;
+                    }
+                    log.info("Message sent to Kafka, offset: {}", result.getRecordMetadata().offset());
+                });
+
+        return ResponseEntity.accepted().build();
     }
 }
